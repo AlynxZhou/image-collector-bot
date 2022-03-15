@@ -1,0 +1,14 @@
+{
+  "name": "image-collector-bot",
+  "version": "0.1.0",
+  "description": "An image collector Telegram bot.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Alynx Zhou <alynx.zhou@gmail.com> (https://alynx.one/)",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "aztgbot": "^1.0.8"
+  }
+}
