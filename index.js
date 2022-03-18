@@ -117,6 +117,8 @@
       }
       // Also process photo caption.
       if (update["message"]["caption"] != null) {
+        // Should be safe.
+        update["message"]["text"] = update["message"]["caption"];
         this.processText(update);
       }
       if (update["message"]["photo"] != null) {
