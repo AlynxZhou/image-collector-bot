@@ -1,6 +1,7 @@
 (async () => {
   const fs = require("fs/promises");
   const path = require("path");
+  const {exec} = require("child_process");
   const {
     BotMaster,
     BotServant,
@@ -11,7 +12,7 @@
   const config = require("./config.json");
   const botAPI = new BotAPI(config["token"]);
   const botLogger = new BotLogger({"debug": false});
-  const workDir = config["workDir"];
+  const {downloadDir} = config;
 
   const State = {
     "IDLE": 0,
@@ -23,6 +24,13 @@
     "TAGS": 6
   };
 
+  const UserState = {
+    "ALLOWED": 0,
+    "NOT_ALLOWED": 1,
+    "NO_USER_NAME": 2,
+    "NO_USERS": 3
+  };
+  
   const myCommands = [
     {"command": "create", "description": "Begin post creating operation."},
     {"command": "delete", "description": "Begin post deleting operation."},
@@ -33,6 +41,9 @@
     {"command": "commit", "description": "End and submit operation."},
     {"command": "cancel", "description": "End and discard operation."}
   ];
+
+  // Only one committing task is allowed at the same time.
+  let committing = false;
 
   class ImageCollectorBot extends BotServant {
     // timeout: how many seconds to wait before automatically cancel uncommitted
@@ -58,13 +69,54 @@
     }
 
     // override
-    processUpdate(update) {
+    async processUpdate(update) {
       // This bot only handle private chating.
       if (update["message"] == null ||
         update["message"]["chat"]["type"] !== "private") {
         return;
       }
+      switch (this.checkUser(update)) {
+      case UserState.NOT_ALLOWED:
+        await this.botAPI.sendChatAction(
+          update["message"]["chat"]["id"], "typing"
+        );
+        await this.botAPI.sendMessage(
+          update["message"]["chat"]["id"],
+          "Your user name is not in allowed users list so you are not allowed to publish images.",
+          {"replyToMessageID": update["message"]["message_id"]}
+        );
+        return;
+      case UserState.NO_USER_NAME:
+        await this.botAPI.sendChatAction(
+          update["message"]["chat"]["id"], "typing"
+        );
+        await this.botAPI.sendMessage(
+          update["message"]["chat"]["id"],
+          "You don't have a username so you are not allowed to publish images.",
+          {"replyToMessageID": update["message"]["message_id"]}
+        );
+        return;
+      case UserState.NO_USERS:
+        await this.botAPI.sendChatAction(
+          update["message"]["chat"]["id"], "typing"
+        );
+        await this.botAPI.sendMessage(
+          update["message"]["chat"]["id"],
+          "Allowed users list is empty so no one is allowed to publish images, please add an array of Telegram user names as `users` key in `config.json`\\.",
+          {
+            "replyToMessageID": update["message"]["message_id"],
+            "parseMode": "MarkdownV2"
+          }
+        );
+        return;
+      default:
+        break;
+      }
       if (update["message"]["text"] != null) {
+        this.processText(update);
+      }
+      // Also process photo caption.
+      if (update["message"]["caption"] != null) {
         this.processText(update);
       }
       if (update["message"]["photo"] != null) {
@@ -91,6 +143,9 @@
       }
       this.timeoutID = setTimeout(async () => {
         this.timeoutID = null;
+        if (this.checkState(State.IDLE)) {
+          return;
+        }
         this.reset();
         // identifier is chat ID.
         await this.botAPI.sendChatAction(this.identifier, "typing");
@@ -108,6 +163,22 @@
         }
       }
       return false;
+    }
+
+    checkUser(update) {
+      if (
+        config["users"] == null || !Array.isArray(config["users"]) ||
+        config["users"].length === 0
+      ) {
+        return UserState.NO_USERS;
+      }
+      if (update["message"]["from"]["username"] == null) {
+        return UserState.NO_USER_NAME;
+      }
+      if (!config["users"].includes(update["message"]["from"]["username"])) {
+        return UserState.NOT_ALLOWED;
+      }
+      return UserState.ALLOWED;
     }
 
     // Actually append to section.
@@ -278,7 +349,7 @@
       const file = await this.botAPI.getFile(fileID);
       const downloadURL = `https://api.telegram.org/file/bot${this.botAPI.token}/${file["file_path"]}`;
       const buffer = await botUtils.get(downloadURL);
-      await fs.writeFile(path.join(workDir, dirName, fileName), buffer);
+      await fs.writeFile(path.join(downloadDir, dirName, fileName), buffer);
     }
 
     async onCommitCommand(update) {
@@ -288,22 +359,36 @@
       )) {
         return;
       }
-      const subdirs = await fs.readdir(workDir);
+      if (committing) {
+        await this.botAPI.sendChatAction(
+          update["message"]["chat"]["id"], "typing"
+        );
+        await this.botAPI.sendMessage(
+          update["message"]["chat"]["id"],
+          "There is already a committing task running, please wait for it and re-commit after it finishes.",
+          {"replyToMessageID": update["message"]["message_id"]}
+        );
+      }
+      committing = true;
+      const subdirs = await fs.readdir(downloadDir);
       if (this.deletedPosts != null) {
         const existingPosts = this.deletedPosts.filter((ele) => {
           return subdirs.includes(ele);
         });
         try {
           await Promise.all(existingPosts.map((ele) => {
-            return fs.rm(path.join(workDir, ele), {"recursive": true});
+            return fs.rm(path.join(downloadDir, ele), {"recursive": true});
           }));
           await this.botAPI.sendChatAction(
             update["message"]["chat"]["id"], "typing"
           );
           await this.botAPI.sendMessage(
             update["message"]["chat"]["id"],
-            `Deleted ${existingPosts.map((ele) => {return `\`${ele}\``; }).join(", ")}.`,
-            {"replyToMessageID": update["message"]["message_id"]}
+            `Deleted ${existingPosts.map((ele) => {return `\`${ele}\``; }).join(", ")}\\.`,
+            {
+              "replyToMessageID": update["message"]["message_id"],
+              "parseMode": "MarkdownV2"
+            }
           );
         } catch (error) {
           botLogger.warn(error);
@@ -335,7 +420,7 @@
           dirName = `${baseName}-${++i}`;
         }
         try {
-          await fs.mkdir(path.join(workDir, dirName));
+          await fs.mkdir(path.join(downloadDir, dirName));
           const fileNames = [];
           await Promise.all(this.post["images"].map((image, i) => {
             let maxSize = image[0];
@@ -349,7 +434,7 @@
             return this.downloadFile(maxSize["file_id"], dirName, fileName);
           }));
           const metadata = {
-            "id": dirName,
+            "dir": dirName,
             "created": created,
             "layout": "album",
             "text": this.post["text"],
@@ -358,7 +443,8 @@
             "tags": this.post["tags"]
           };
           await fs.writeFile(
-            path.join(workDir, dirName, "index.json"), JSON.stringify(metadata),
+            path.join(downloadDir, dirName, "index.json"),
+            JSON.stringify(metadata),
             "utf8"
           );
           await this.botAPI.sendChatAction(
@@ -366,13 +452,16 @@
           );
           await this.botAPI.sendMessage(
             update["message"]["chat"]["id"],
-            `Created \`${dirName}\`.`,
-            {"replyToMessageID": update["message"]["message_id"]}
+            `Created \`${dirName}\`\\.`,
+            {
+              "replyToMessageID": update["message"]["message_id"],
+              "parseMode": "MarkdownV2"
+            }
           );
         } catch (error) {
           botLogger.warn(error);
           await fs.rm(
-            path.join(workDir, dirName), {"recursive": true, "force": true}
+            path.join(downloadDir, dirName), {"recursive": true, "force": true}
           );
           await this.botAPI.sendChatAction(
             update["message"]["chat"]["id"], "typing"
@@ -384,7 +473,24 @@
           );
         }
       }
-      // TODO: call deploy scripts.
+      if (!config["buildCommand"] || !config["buildCommandWorkDir"]) {
+        committing = false;
+      } else {
+        exec(
+          config["buildCommand"], {"cwd": config["buildCommandWorkDir"]},
+          async (error, stdout, stderr) => {
+            committing = false;
+            await this.botAPI.sendChatAction(
+              update["message"]["chat"]["id"], "typing"
+            );
+            await this.botAPI.sendMessage(
+              update["message"]["chat"]["id"],
+              "Build command finished, committing task done.",
+              {"replyToMessageID": update["message"]["message_id"]}
+            );
+          }
+        );
+      }
       this.state = State.IDLE;
       this.reset();
     }
