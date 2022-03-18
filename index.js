@@ -482,6 +482,12 @@
           config["buildCommand"], {"cwd": config["buildCommandWorkDir"]},
           async (error, stdout, stderr) => {
             committing = false;
+            if (error) {
+              botLogger.error(`exec error: ${error}`);
+              return;
+            }
+            botLogger.log(`stdout: ${stdout}`);
+            botLogger.error(`stderr: ${stderr}`);
             await this.botAPI.sendChatAction(
               update["message"]["chat"]["id"], "typing"
             );
