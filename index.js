@@ -347,94 +347,70 @@
       );
     }
 
+    makeDirName(created, subdirs) {
+      // Use timestamp as ID and dir name.
+      let baseName = `${created}`;
+      // Timestamps may start with `-`, replace it with `n` because dir starts
+      // with `-` is hard to handle for shell commands.
+      // But is 2022 now, is there anyone using it in 1969?
+      if (baseName.charAt(0) === "-") {
+        baseName = `n${baseName.substring(1)}`;
+      }
+      let dirName = baseName;
+      let i = 0;
+      // If conflict, find a new name. Very little chance.
+      while (subdirs.includes(dirName)) {
+        dirName = `${baseName}-${++i}`;
+      }
+      return dirName;
+    }
+
     async downloadFile(fileID, dirName, fileName) {
       const file = await this.botAPI.getFile(fileID);
       const downloadURL = `https://api.telegram.org/file/bot${this.botAPI.token}/${file["file_path"]}`;
       const buffer = await botUtils.get(downloadURL);
       await fs.writeFile(path.join(downloadDir, dirName, fileName), buffer);
+      return fileName;
     }
 
-    async onCommitCommand(update) {
-      if (!this.checkState(
-        State.CREATE, State.DELETE, State.TEXT, State.IMAGES, State.AUTHORS,
-        State.TAGS
-      )) {
-        return;
-      }
-      if (committing) {
-        await this.botAPI.sendChatAction(
-          update["message"]["chat"]["id"], "typing"
-        );
-        await this.botAPI.sendMessage(
-          update["message"]["chat"]["id"],
-          "There is already a committing task running, please wait for it and re-commit after it finishes.",
-          {"replyToMessageID": update["message"]["message_id"]}
-        );
-      }
-      committing = true;
-      const subdirs = await fs.readdir(downloadDir);
-      if (this.deletedPosts != null) {
-        const existingPosts = this.deletedPosts.filter((ele) => {
-          return subdirs.includes(ele);
-        });
-        try {
-          await Promise.all(existingPosts.map((ele) => {
-            return fs.rm(path.join(downloadDir, ele), {"recursive": true});
-          }));
-          await this.botAPI.sendChatAction(
-            update["message"]["chat"]["id"], "typing"
-          );
-          await this.botAPI.sendMessage(
-            update["message"]["chat"]["id"],
-            `Deleted ${existingPosts.map((ele) => {return `\`${ele}\``; }).join(", ")}\\.`,
-            {
-              "replyToMessageID": update["message"]["message_id"],
-              "parseMode": "MarkdownV2"
-            }
-          );
-        } catch (error) {
-          botLogger.warn(error);
-          await this.botAPI.sendChatAction(
-            update["message"]["chat"]["id"], "typing"
-          );
-          await this.botAPI.sendMessage(
-            update["message"]["chat"]["id"],
-            "There is something wrong while committing.",
-            {"replyToMessageID": update["message"]["message_id"]}
-          );
+    async sendCodeBlock(update, content, opts = {}) {
+      await this.botAPI.sendChatAction(
+        update["message"]["chat"]["id"], "typing"
+      );
+      await this.botAPI.sendMessage(
+        update["message"]["chat"]["id"],
+        [
+          `${opts["header"] || ""}:`,
+          `\`\`\`${opts["lang"] || ""}`,
+          `${content}`,
+          `\`\`\``
+        ].join("\n"),
+        {
+          "replyToMessageID": update["message"]["message_id"],
+          "parseMode": "MarkdownV2"
         }
-      }
+      );
+    }
+
+    async commitCreate(update, subdirs) {
       if (this.post != null &&
           (this.post["text"] != null || this.post["images"] != null)) {
         const created = Date.now();
-        // Use timestamp as ID and dir name.
-        let baseName = `${created}`;
-        // Timestamps may start with `-`, replace it with `n` because dir starts
-        // with `-` is hard to handle for shell commands.
-        // But is 2022 now, is there anyone using it in 1969?
-        if (baseName.charAt(0) === "-") {
-          baseName = `n${baseName.substring(1)}`;
-        }
-        let dirName = baseName;
-        let i = 0;
-        // If conflict, find a new name. Very little chance.
-        while (subdirs.includes(dirName)) {
-          dirName = `${baseName}-${++i}`;
-        }
+        const dirName = this.makeDirName(created, subdirs);
         try {
           await fs.mkdir(path.join(downloadDir, dirName));
-          const fileNames = [];
-          await Promise.all(this.post["images"].map((image, i) => {
-            let maxSize = image[0];
-            for (const size of image) {
-              if (maxSize["file_size"] < size["file_size"]) {
-                maxSize = size;
+          const fileNames = await Promise.all(
+            this.post["images"].map((image, i) => {
+              let maxSize = image[0];
+              for (const size of image) {
+                if (maxSize["file_size"] < size["file_size"]) {
+                  maxSize = size;
+                }
               }
-            }
-            const fileName = `${i + 1}.jpg`;
-            fileNames.push(fileName);
-            return this.downloadFile(maxSize["file_id"], dirName, fileName);
-          }));
+              const fileName = `${i + 1}.jpg`;
+              return this.downloadFile(maxSize["file_id"], dirName, fileName);
+            })
+          );
           const metadata = {
             "dir": dirName,
             "created": created,
@@ -462,19 +438,58 @@
           );
         } catch (error) {
           botLogger.warn(error);
-          await fs.rm(
-            path.join(downloadDir, dirName), {"recursive": true, "force": true}
+          try {
+            await fs.rm(
+              path.join(downloadDir, dirName),
+              {"recursive": true, "force": true}
+            );
+          } catch (error) {
+          }
+          await this.sendCodeBlock(
+            update,
+            JSON.stringify(error, null, "  "),
+            {"header": "error", "lang": "json"}
           );
+        }
+      }
+    }
+
+    async commitDelete(update) {
+      const subdirs = await fs.readdir(downloadDir);
+      if (this.deletedPosts != null) {
+        const existingPosts = this.deletedPosts.filter((ele) => {
+          return subdirs.includes(ele);
+        });
+        try {
+          await Promise.all(existingPosts.map((ele) => {
+            return fs.rm(path.join(downloadDir, ele), {"recursive": true});
+          }));
           await this.botAPI.sendChatAction(
             update["message"]["chat"]["id"], "typing"
           );
           await this.botAPI.sendMessage(
             update["message"]["chat"]["id"],
-            "There is something wrong while committing, your operations are cancelled.",
-            {"replyToMessageID": update["message"]["message_id"]}
+            `Deleted ${existingPosts.map((ele) => {
+              return `\`${ele}\``;
+            }).join(", ")}\\.`,
+            {
+              "replyToMessageID": update["message"]["message_id"],
+              "parseMode": "MarkdownV2"
+            }
+          );
+        } catch (error) {
+          botLogger.warn(error);
+          await this.sendCodeBlock(
+            update,
+            JSON.stringify(error, null, "  "),
+            {"header": "error", "lang": "json"}
           );
         }
       }
+    }
+
+    runBuildCommand(update) {
+      // committing is global.
       if (!config["buildCommand"] || !config["buildCommandWorkDir"]) {
         committing = false;
       } else {
@@ -482,23 +497,71 @@
           config["buildCommand"], {"cwd": config["buildCommandWorkDir"]},
           async (error, stdout, stderr) => {
             committing = false;
-            if (error) {
-              botLogger.error(`exec error: ${error}`);
-              return;
+            // We always send stdout and stderr, so don't return here.
+            if (error != null) {
+              botLogger.warn(`exec error: ${error}`);
+              await this.botAPI.sendChatAction(
+                update["message"]["chat"]["id"], "typing"
+              );
+              await this.botAPI.sendMessage(
+                update["message"]["chat"]["id"],
+                "Build command failed, committing task done.",
+                {"replyToMessageID": update["message"]["message_id"]}
+              );
+              await this.sendCodeBlock(
+                update,
+                JSON.stringify(error, null, "  "),
+                {"header": "error", "lang": "json"}
+              );
+            } else {
+              await this.botAPI.sendChatAction(
+                update["message"]["chat"]["id"], "typing"
+              );
+              await this.botAPI.sendMessage(
+                update["message"]["chat"]["id"],
+                "Build command succeeded, committing task done.",
+                {"replyToMessageID": update["message"]["message_id"]}
+              );
             }
-            botLogger.log(`stdout: ${stdout}`);
-            botLogger.error(`stderr: ${stderr}`);
-            await this.botAPI.sendChatAction(
-              update["message"]["chat"]["id"], "typing"
-            );
-            await this.botAPI.sendMessage(
-              update["message"]["chat"]["id"],
-              "Build command finished, committing task done.",
-              {"replyToMessageID": update["message"]["message_id"]}
-            );
+            if (stdout != null && stdout.length !== 0) {
+              botLogger.log(`stdout: ${stdout}`);
+              await this.sendCodeBlock(update, stdout, {"header": "stdout"});
+            }
+            if (stderr != null && stderr.length !== 0) {
+              botLogger.warn(`stderr: ${stderr}`);
+              await this.sendCodeBlock(update, stderr, {"header": "stderr"});
+            }
           }
         );
       }
+    }
+
+    async onCommitCommand(update) {
+      if (!this.checkState(
+        State.CREATE, State.DELETE, State.TEXT, State.IMAGES, State.AUTHORS,
+        State.TAGS
+      )) {
+        return;
+      }
+      // committing is global.
+      if (committing) {
+        await this.botAPI.sendChatAction(
+          update["message"]["chat"]["id"], "typing"
+        );
+        await this.botAPI.sendMessage(
+          update["message"]["chat"]["id"],
+          "There is already a committing task running, please wait for it and re-commit after it finishes.",
+          {"replyToMessageID": update["message"]["message_id"]}
+        );
+      }
+      committing = true;
+      const subdirs = await fs.readdir(downloadDir);
+      if (this.checkState(State.DELETE)) {
+        await this.commitDelete(update, subdirs);
+      } else {
+        await this.commitCreate(update, subdirs);
+      }
+      this.runBuildCommand(update);
       this.state = State.IDLE;
       this.reset();
     }
