@@ -25,11 +25,34 @@
     "DATE": 7
   };
 
+  const stateToString = (state) => {
+    for (const k in State) {
+      if (State[k] === state) {
+        return k;
+      }
+    }
+    return null;
+  };
+
   const UserState = {
     "ALLOWED": 0,
     "NOT_ALLOWED": 1,
     "NO_USER_NAME": 2,
     "NO_USERS": 3
+  };
+
+  const checkUser = (update) => {
+    if (config["users"] == null || !Array.isArray(config["users"]) ||
+        config["users"].length === 0) {
+      return UserState.NO_USERS;
+    }
+    if (update["message"]["from"]["username"] == null) {
+      return UserState.NO_USER_NAME;
+    }
+    if (!config["users"].includes(update["message"]["from"]["username"])) {
+      return UserState.NOT_ALLOWED;
+    }
+    return UserState.ALLOWED;
   };
 
   const myCommands = [
@@ -71,6 +94,17 @@
       this.timeoutID = null;
     }
 
+    async typeAndReply(update, text, parseMode = null) {
+      await this.botAPI.sendChatAction(update["message"]["chat"]["id"],
+                                       "typing");
+      const opts = {"replyToMessageID": update["message"]["message_id"]};
+      if (parseMode != null) {
+        opts["parseMode"] = parseMode;
+      }
+      await this.botAPI.sendMessage(update["message"]["chat"]["id"], text,
+                                    opts);
+    }
+
     // override
     async processUpdate(update) {
       // This bot only handle private chating.
@@ -78,39 +112,19 @@
         update["message"]["chat"]["type"] !== "private") {
         return;
       }
-      switch (this.checkUser(update)) {
+      switch (checkUser(update)) {
       case UserState.NOT_ALLOWED:
-        await this.botAPI.sendChatAction(
-          update["message"]["chat"]["id"], "typing"
-        );
-        await this.botAPI.sendMessage(
-          update["message"]["chat"]["id"],
-          "Your user name is not in allowed users list so you are not allowed to publish images.",
-          {"replyToMessageID": update["message"]["message_id"]}
-        );
+        await this.typeAndReply(update,
+                                "Your user name is not in allowed users list so you are not allowed to publish images.");
         return;
       case UserState.NO_USER_NAME:
-        await this.botAPI.sendChatAction(
-          update["message"]["chat"]["id"], "typing"
-        );
-        await this.botAPI.sendMessage(
-          update["message"]["chat"]["id"],
-          "You don't have a username so you are not allowed to publish images.",
-          {"replyToMessageID": update["message"]["message_id"]}
-        );
+        await this.typeAndReply(update,
+                                "You don't have a username so you are not allowed to publish images.");
         return;
       case UserState.NO_USERS:
-        await this.botAPI.sendChatAction(
-          update["message"]["chat"]["id"], "typing"
-        );
-        await this.botAPI.sendMessage(
-          update["message"]["chat"]["id"],
-          "Allowed users list is empty so no one is allowed to publish images, please add an array of Telegram user names as `users` key in `config.json`\\.",
-          {
-            "replyToMessageID": update["message"]["message_id"],
-            "parseMode": "MarkdownV2"
-          }
-        );
+        await this.typeAndReply(update,
+                                "Allowed users list is empty so no one is allowed to publish images, please add an array of Telegram user names as `users` key in `config.json`\\.",
+                                "MarkdownV2");
         return;
       default:
         break;
@@ -127,8 +141,8 @@
       if (update["message"]["photo"] != null) {
         this.processImages(update);
       }
-      // TODO: uncompressed images maybe sent as files.
-      botLogger.debug(`${this.botName}@${this.identifier}: state: ${this.state}, post: ${JSON.stringify(this.post, null, "  ")}, deletedPosts: ${JSON.stringify(this.deletedPosts, null, "  ")}`);
+      // TODO: uncompressed images may be sent as files.
+      botLogger.info(`${this.botName}@${this.identifier}: state: ${stateToString(state)}, post: ${JSON.stringify(this.post, null, "  ")}, deletedPosts: ${JSON.stringify(this.deletedPosts, null, "  ")}`);
     }
 
     isMyCommand(update, command) {
@@ -140,6 +154,10 @@
       this.state = State.IDLE;
       this.post = null;
       this.deletedPosts = null;
+    }
+
+    checkState(...validStates) {
+      return validStates.includes(this.state);
     }
 
     refreshTimer() {
@@ -159,31 +177,6 @@
           "Your operations have been cancelled because of timeout."
         );
       }, this.timeout * 1000);
-    }
-
-    checkState(...validStates) {
-      for (const state of validStates) {
-        if (this.state === state) {
-          return true;
-        }
-      }
-      return false;
-    }
-
-    checkUser(update) {
-      if (
-        config["users"] == null || !Array.isArray(config["users"]) ||
-        config["users"].length === 0
-      ) {
-        return UserState.NO_USERS;
-      }
-      if (update["message"]["from"]["username"] == null) {
-        return UserState.NO_USER_NAME;
-      }
-      if (!config["users"].includes(update["message"]["from"]["username"])) {
-        return UserState.NOT_ALLOWED;
-      }
-      return UserState.ALLOWED;
     }
 
     // Actually append to section.
@@ -260,14 +253,7 @@
         "tags": null,
         "date": null
       };
-      await this.botAPI.sendChatAction(
-        update["message"]["chat"]["id"], "typing"
-      );
-      await this.botAPI.sendMessage(
-        update["message"]["chat"]["id"],
-        "Please attach images or text.",
-        {"replyToMessageID": update["message"]["message_id"]}
-      );
+      await this.typeAndReply(update, "Please attach images or text.");
     }
 
     async onDeleteCommand(update) {
@@ -276,14 +262,8 @@
       }
       this.state = State.DELETE;
       this.deletedPosts = [];
-      await this.botAPI.sendChatAction(
-        update["message"]["chat"]["id"], "typing"
-      );
-      await this.botAPI.sendMessage(
-        update["message"]["chat"]["id"],
-        "Please attach deleted IDs, each message contains one ID.",
-        {"replyToMessageID": update["message"]["message_id"]}
-      );
+      await this.typeAndReply(update,
+                              "Please attach deleted IDs, each message contains one ID.");
     }
 
     async onTextCommand(update) {
@@ -295,14 +275,7 @@
         return;
       }
       this.state = State.TEXT;
-      await this.botAPI.sendChatAction(
-        update["message"]["chat"]["id"], "typing"
-      );
-      await this.botAPI.sendMessage(
-        update["message"]["chat"]["id"],
-        "Please attach text.",
-        {"replyToMessageID": update["message"]["message_id"]}
-      );
+      await this.typeAndReply(update, "Please attach text.");
     }
 
     async onImagesCommand(update) {
@@ -314,14 +287,7 @@
         return;
       }
       this.state = State.IMAGES;
-      await this.botAPI.sendChatAction(
-        update["message"]["chat"]["id"], "typing"
-      );
-      await this.botAPI.sendMessage(
-        update["message"]["chat"]["id"],
-        "Please attach images.",
-        {"replyToMessageID": update["message"]["message_id"]}
-      );
+      await this.typeAndReply(update, "Please attach images.");
     }
 
     async onAuthorsCommand(update) {
@@ -333,14 +299,8 @@
         return;
       }
       this.state = State.AUTHORS;
-      await this.botAPI.sendChatAction(
-        update["message"]["chat"]["id"], "typing"
-      );
-      await this.botAPI.sendMessage(
-        update["message"]["chat"]["id"],
-        "Please attach authors, each message contains one author.",
-        {"replyToMessageID": update["message"]["message_id"]}
-      );
+      await this.typeAndReply(update,
+                              "Please attach authors, each message contains one author.");
     }
 
     async onTagsCommand(update) {
@@ -352,14 +312,8 @@
         return;
       }
       this.state = State.TAGS;
-      await this.botAPI.sendChatAction(
-        update["message"]["chat"]["id"], "typing"
-      );
-      await this.botAPI.sendMessage(
-        update["message"]["chat"]["id"],
-        "Please attach tags, each message contains one tag.",
-        {"replyToMessageID": update["message"]["message_id"]}
-      );
+      await this.typeAndReply(update,
+                              "Please attach tags, each message contains one tag.");
     }
 
     async onDateCommand(update) {
@@ -371,14 +325,8 @@
         return;
       }
       this.state = State.DATE;
-      await this.botAPI.sendChatAction(
-        update["message"]["chat"]["id"], "typing"
-      );
-      await this.botAPI.sendMessage(
-        update["message"]["chat"]["id"],
-        "Please add created time and date in YYYY-MM-DD HH:mm:ss format.",
-        {"replyToMessageID": update["message"]["message_id"]}
-      );
+      await this.typeAndReply(update,
+                              "Please add created time and date in YYYY-MM-DD HH:mm:ss format.");
     }
 
     makeDirName(committed, subdirs) {
@@ -396,33 +344,29 @@
       while (subdirs.includes(dirName)) {
         dirName = `${baseName}-${++i}`;
       }
+      botLogger.info(`Generated new dir name ${dirName}.`);
       return dirName;
     }
 
     async downloadFile(fileID, dirName, fileName) {
       const file = await this.botAPI.getFile(fileID);
       const downloadURL = `https://api.telegram.org/file/bot${this.botAPI.token}/${file["file_path"]}`;
+      botLogger.info(`Downloading from ${downloadURL}.`);
       const buffer = await botUtils.get(downloadURL);
       await fs.writeFile(path.join(downloadDir, dirName, fileName), buffer);
       return fileName;
     }
 
-    async sendCodeBlock(update, content, opts = {}) {
-      await this.botAPI.sendChatAction(
-        update["message"]["chat"]["id"], "typing"
-      );
-      await this.botAPI.sendMessage(
-        update["message"]["chat"]["id"],
+    async typeAndReplyCodeBlock(update, content, opts = {}) {
+      await this.typeAndReply(
+        update,
         [
           `${opts["header"] || ""}:`,
           `\`\`\`${opts["lang"] || ""}`,
           `${content}`,
           `\`\`\``
         ].join("\n"),
-        {
-          "replyToMessageID": update["message"]["message_id"],
-          "parseMode": "MarkdownV2"
-        }
+        "MarkdownV2"
       );
     }
 
@@ -460,17 +404,8 @@
             JSON.stringify(metadata),
             "utf8"
           );
-          await this.botAPI.sendChatAction(
-            update["message"]["chat"]["id"], "typing"
-          );
-          await this.botAPI.sendMessage(
-            update["message"]["chat"]["id"],
-            `Created \`${dirName}\`\\.`,
-            {
-              "replyToMessageID": update["message"]["message_id"],
-              "parseMode": "MarkdownV2"
-            }
-          );
+          await this.typeAndReply(update, `Created \`${dirName}\`\\.`,
+                                  "MarkdownV2");
         } catch (error) {
           botLogger.warn(error);
           try {
@@ -480,7 +415,7 @@
             );
           } catch (error) {
           }
-          await this.sendCodeBlock(
+          await this.typeAndReplyCodeBlock(
             update,
             JSON.stringify(error, null, "  "),
             {"header": "error", "lang": "json"}
@@ -499,22 +434,16 @@
           await Promise.all(existingPosts.map((ele) => {
             return fs.rm(path.join(downloadDir, ele), {"recursive": true});
           }));
-          await this.botAPI.sendChatAction(
-            update["message"]["chat"]["id"], "typing"
-          );
-          await this.botAPI.sendMessage(
-            update["message"]["chat"]["id"],
-            `Deleted ${existingPosts.map((ele) => {
+          await this.typeAndReply(
+            update,
+             `Deleted ${existingPosts.map((ele) => {
               return `\`${ele}\``;
             }).join(", ")}\\.`,
-            {
-              "replyToMessageID": update["message"]["message_id"],
-              "parseMode": "MarkdownV2"
-            }
+            "MarkdownV2"
           );
         } catch (error) {
           botLogger.warn(error);
-          await this.sendCodeBlock(
+          await this.typeAndReplyCodeBlock(
             update,
             JSON.stringify(error, null, "  "),
             {"header": "error", "lang": "json"}
@@ -524,53 +453,51 @@
     }
 
     runBuildCommand(update) {
-      // committing is global.
-      if (config["buildCommand"] == null || config["buildCommandWorkDir"] == null) {
-        committing = false;
+      // Committing is global so don't forget to reset the lock here.
+      if (config["buildCommand"] == null ||
+          config["buildCommandWorkDir"] == null) {
         botLogger.warn("buildCommand or buildCommandWorkDir is not set!");
-      } else {
-        botLogger.debug("Running build command.");
-        exec(
-          config["buildCommand"], {"cwd": config["buildCommandWorkDir"]},
-          async (error, stdout, stderr) => {
-            committing = false;
-            // We always send stdout and stderr, so don't return here.
-            if (error != null) {
-              botLogger.warn(`exec error: ${error}`);
-              await this.botAPI.sendChatAction(
-                update["message"]["chat"]["id"], "typing"
-              );
-              await this.botAPI.sendMessage(
-                update["message"]["chat"]["id"],
-                "Build command failed, committing task done.",
-                {"replyToMessageID": update["message"]["message_id"]}
-              );
-              await this.sendCodeBlock(
-                update,
-                JSON.stringify(error, null, "  "),
-                {"header": "error", "lang": "json"}
-              );
-            } else {
-              await this.botAPI.sendChatAction(
-                update["message"]["chat"]["id"], "typing"
-              );
-              await this.botAPI.sendMessage(
-                update["message"]["chat"]["id"],
-                "Build command succeeded, committing task done.",
-                {"replyToMessageID": update["message"]["message_id"]}
-              );
-            }
-            if (stdout != null && stdout.length !== 0) {
-              botLogger.log(`stdout: ${stdout}`);
-              await this.sendCodeBlock(update, stdout, {"header": "stdout"});
-            }
-            if (stderr != null && stderr.length !== 0) {
-              botLogger.warn(`stderr: ${stderr}`);
-              await this.sendCodeBlock(update, stderr, {"header": "stderr"});
-            }
-          }
-        );
+        committing = false;
+        return;
       }
+      botLogger.info("Running build command.");
+      // NOTE: Typically here we run a script contains git push, and because
+      // Node.js does not support `http_proxy` envs, we have to use proxychains,
+      // but according to <https://github.com/rofl0r/proxychains-ng/issues/314>,
+      // ssh will not work with it until we build the latest git version.
+      // To solve this, there are two options: 1. Use https protocol
+      // (recommended), 2. Modify env here to exclude `LD_PRELOAD`.
+      exec(
+        config["buildCommand"], {"cwd": config["buildCommandWorkDir"]},
+        async (error, stdout, stderr) => {
+          botLogger.info("Build command finished.");
+          committing = false;
+          // We always send stdout and stderr, so don't return here.
+          if (error != null) {
+            botLogger.warn(`exec error: ${error}`);
+            await this.typeAndReply(update,
+                                    "Build command failed, committing task done.");
+            await this.typeAndReplyCodeBlock(
+              update,
+              JSON.stringify(error, null, "  "),
+              {"header": "error", "lang": "json"}
+            );
+          } else {
+            await this.typeAndReply(update,
+                                    "Build command succeeded, committing task done.");
+          }
+          if (stdout != null && stdout.length !== 0) {
+            botLogger.log(`stdout: ${stdout}`);
+            await this.typeAndReplyCodeBlock(update, stdout,
+                                             {"header": "stdout"});
+          }
+          if (stderr != null && stderr.length !== 0) {
+            botLogger.warn(`stderr: ${stderr}`);
+            await this.typeAndReplyCodeBlock(update, stderr,
+                                             {"header": "stderr"});
+          }
+        }
+      );
     }
 
     async onCommitCommand(update) {
@@ -582,16 +509,12 @@
       }
       // committing is global.
       if (committing) {
-        await this.botAPI.sendChatAction(
-          update["message"]["chat"]["id"], "typing"
-        );
-        await this.botAPI.sendMessage(
-          update["message"]["chat"]["id"],
-          "There is already a committing task running, please wait for it and re-commit after it finishes.",
-          {"replyToMessageID": update["message"]["message_id"]}
-        );
+        botLogger.warn("Running committing, ignore this request.");
+        await this.typeAndReply(update,
+                                "There is already a committing task running, please wait for it and re-commit after it finishes.");
         return;
       }
+      botLogger.info("Start committing.");
       committing = true;
       const subdirs = await fs.readdir(downloadDir);
       if (this.checkState(State.DELETE)) {
@@ -611,16 +534,10 @@
       )) {
         return;
       }
+      botLogger.info("Cancelled.");
       this.state = State.IDLE;
       this.reset();
-      await this.botAPI.sendChatAction(
-        update["message"]["chat"]["id"], "typing"
-      );
-      await this.botAPI.sendMessage(
-        update["message"]["chat"]["id"],
-        "Cancelled.",
-        {"replyToMessageID": update["message"]["message_id"]}
-      );
+      await this.typeAndReply(update, "Cancelled.");
     }
 
     onCommand(update) {
