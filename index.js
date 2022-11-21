@@ -21,7 +21,8 @@
     "TEXT": 3,
     "IMAGES": 4,
     "AUTHORS": 5,
-    "TAGS": 6
+    "TAGS": 6,
+    "DATE": 7
   };
 
   const UserState = {
@@ -30,7 +31,7 @@
     "NO_USER_NAME": 2,
     "NO_USERS": 3
   };
-  
+
   const myCommands = [
     {"command": "create", "description": "Begin post creating operation."},
     {"command": "delete", "description": "Begin post deleting operation."},
@@ -38,6 +39,7 @@
     {"command": "images", "description": "Add an images section for post."},
     {"command": "authors", "description": "Add an authors section for post."},
     {"command": "tags", "description": "Add a tags section for post."},
+    {"command": "date", "description": "Set created date and time."},
     {"command": "commit", "description": "End and submit operation."},
     {"command": "cancel", "description": "End and discard operation."}
   ];
@@ -59,6 +61,7 @@
         "images": this.onImagesCommand.bind(this),
         "authors": this.onAuthorsCommand.bind(this),
         "tags": this.onTagsCommand.bind(this),
+        "date": this.onDateCommand.bind(this),
         "commit": this.onCommitCommand.bind(this),
         "cancel": this.onCancelCommand.bind(this)
       };
@@ -229,6 +232,13 @@
       this.post["tags"].push(update["message"]["text"].trim());
     }
 
+    appendDate(update) {
+      if (this.post == null) {
+        return;
+      }
+      this.post["date"] = new Date(update["message"]["text"].trim()).getTime();
+    }
+
     appendDeletedPosts(update) {
       if (this.deletedPosts == null) {
         return;
@@ -247,7 +257,8 @@
         "text": null,
         "images": null,
         "authors": null,
-        "tags": null
+        "tags": null,
+        "date": null
       };
       await this.botAPI.sendChatAction(
         update["message"]["chat"]["id"], "typing"
@@ -278,7 +289,7 @@
     async onTextCommand(update) {
       // From IDLE or DELETE to TEXT is not allowed.
       if (!this.checkState(
-        State.CREATE, State.TEXT, State.IMAGES, State.AUTHORS, State.TAGS
+        State.CREATE, State.TEXT, State.IMAGES, State.AUTHORS, State.TAGS, State.DATE
       )) {
         return;
       }
@@ -296,7 +307,7 @@
     async onImagesCommand(update) {
       // From IDLE or DELETE to IMAGES is not allowed.
       if (!this.checkState(
-        State.CREATE, State.TEXT, State.IMAGES, State.AUTHORS, State.TAGS
+        State.CREATE, State.TEXT, State.IMAGES, State.AUTHORS, State.TAGS, State.DATE
       )) {
         return;
       }
@@ -314,7 +325,7 @@
     async onAuthorsCommand(update) {
       // From IDLE or DELETE to AUTHORS is not allowed.
       if (!this.checkState(
-        State.CREATE, State.TEXT, State.IMAGES, State.AUTHORS, State.TAGS
+        State.CREATE, State.TEXT, State.IMAGES, State.AUTHORS, State.TAGS, State.DATE
       )) {
         return;
       }
@@ -332,7 +343,7 @@
     async onTagsCommand(update) {
       // From IDLE or DELETE to TAGS is not allowed.
       if (!this.checkState(
-        State.CREATE, State.TEXT, State.IMAGES, State.AUTHORS, State.TAGS
+        State.CREATE, State.TEXT, State.IMAGES, State.AUTHORS, State.TAGS, State.DATE
       )) {
         return;
       }
@@ -347,9 +358,27 @@
       );
     }
 
-    makeDirName(created, subdirs) {
+    async onDateCommand(update) {
+      // From IDLE or DELETE to CREATED is not allowed.
+      if (!this.checkState(
+        State.CREATE, State.TEXT, State.IMAGES, State.AUTHORS, State.TAGS, State.DATE
+      )) {
+        return;
+      }
+      this.state = State.DATE;
+      await this.botAPI.sendChatAction(
+        update["message"]["chat"]["id"], "typing"
+      );
+      await this.botAPI.sendMessage(
+        update["message"]["chat"]["id"],
+        "Please add created time and date in YYYY-MM-DD HH:mm:ss format.",
+        {"replyToMessageID": update["message"]["message_id"]}
+      );
+    }
+
+    makeDirName(committed, subdirs) {
       // Use timestamp as ID and dir name.
-      let baseName = `${created}`;
+      let baseName = `${committed}`;
       // Timestamps may start with `-`, replace it with `n` because dir starts
       // with `-` is hard to handle for shell commands.
       // But is 2022 now, is there anyone using it in 1969?
@@ -395,8 +424,9 @@
     async commitCreate(update, subdirs) {
       if (this.post != null &&
           (this.post["text"] != null || this.post["images"] != null)) {
-        const created = Date.now();
-        const dirName = this.makeDirName(created, subdirs);
+        // We always use committed time as dir name to prevent conflict.
+        const committed = Date.now();
+        const dirName = this.makeDirName(committed, subdirs);
         try {
           await fs.mkdir(path.join(downloadDir, dirName));
           const fileNames = await Promise.all(
@@ -413,7 +443,7 @@
           );
           const metadata = {
             "dir": dirName,
-            "created": created,
+            "created": this.post["date"] || committed,
             "layout": "album",
             "text": this.post["text"],
             "images": fileNames,
@@ -594,22 +624,25 @@
         return;
       }
       switch (this.state) {
-        // By default text message is handled as text.
-        case State.CREATE:
-        case State.TEXT:
-        case State.IMAGES:
-          this.appendText(update);
-          break;
-        case State.AUTHORS:
-          this.appendAuthors(update);
-          break;
-        case State.TAGS:
-          this.appendTags(update);
-          break;
-        case State.DELETE:
-          this.appendDeletedPosts(update);
-        default:
-          break;
+      // By default text message is handled as text.
+      case State.CREATE:
+      case State.TEXT:
+      case State.IMAGES:
+        this.appendText(update);
+        break;
+      case State.AUTHORS:
+        this.appendAuthors(update);
+        break;
+      case State.TAGS:
+        this.appendTags(update);
+        break;
+      case State.DATE:
+        this.appendDate(update);
+        break;
+      case State.DELETE:
+        this.appendDeletedPosts(update);
+      default:
+        break;
       }
     }
 
