@@ -590,6 +590,7 @@
           "There is already a committing task running, please wait for it and re-commit after it finishes.",
           {"replyToMessageID": update["message"]["message_id"]}
         );
+        return;
       }
       committing = true;
       const subdirs = await fs.readdir(downloadDir);
