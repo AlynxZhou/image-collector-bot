@@ -601,7 +601,7 @@
       this.reset();
     }
 
-    onCancelCommand(update) {
+    async onCancelCommand(update) {
       if (!this.checkState(
         State.CREATE, State.DELETE, State.TEXT, State.IMAGES, State.AUTHORS,
         State.TAGS, State.DATE
@@ -610,6 +610,14 @@
       }
       this.state = State.IDLE;
       this.reset();
+      await this.botAPI.sendChatAction(
+        update["message"]["chat"]["id"], "typing"
+      );
+      await this.botAPI.sendMessage(
+        update["message"]["chat"]["id"],
+        "Cancelled.",
+        {"replyToMessageID": update["message"]["message_id"]}
+      );
     }
 
     onCommand(update) {
