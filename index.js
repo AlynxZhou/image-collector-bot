@@ -525,9 +525,11 @@
 
     runBuildCommand(update) {
       // committing is global.
-      if (!config["buildCommand"] || !config["buildCommandWorkDir"]) {
+      if (config["buildCommand"] == null || config["buildCommandWorkDir"] == null) {
         committing = false;
+        botLogger.warn("buildCommand or buildCommandWorkDir is not set!");
       } else {
+        botLogger.debug("Running build command.");
         exec(
           config["buildCommand"], {"cwd": config["buildCommandWorkDir"]},
           async (error, stdout, stderr) => {
