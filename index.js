@@ -142,7 +142,7 @@
         this.processImages(update);
       }
       // TODO: uncompressed images may be sent as files.
-      botLogger.info(`${this.botName}@${this.identifier}: state: ${stateToString(state)}, post: ${JSON.stringify(this.post, null, "  ")}, deletedPosts: ${JSON.stringify(this.deletedPosts, null, "  ")}`);
+      botLogger.info(`${this.botName}@${this.identifier}: state: ${stateToString(this.state)}, post: ${JSON.stringify(this.post, null, "  ")}, deletedPosts: ${JSON.stringify(this.deletedPosts, null, "  ")}`);
     }
 
     isMyCommand(update, command) {
