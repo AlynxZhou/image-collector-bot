@@ -289,7 +289,8 @@
     async onTextCommand(update) {
       // From IDLE or DELETE to TEXT is not allowed.
       if (!this.checkState(
-        State.CREATE, State.TEXT, State.IMAGES, State.AUTHORS, State.TAGS, State.DATE
+        State.CREATE, State.TEXT, State.IMAGES, State.AUTHORS, State.TAGS,
+        State.DATE
       )) {
         return;
       }
@@ -307,7 +308,8 @@
     async onImagesCommand(update) {
       // From IDLE or DELETE to IMAGES is not allowed.
       if (!this.checkState(
-        State.CREATE, State.TEXT, State.IMAGES, State.AUTHORS, State.TAGS, State.DATE
+        State.CREATE, State.TEXT, State.IMAGES, State.AUTHORS, State.TAGS,
+        State.DATE
       )) {
         return;
       }
@@ -325,7 +327,8 @@
     async onAuthorsCommand(update) {
       // From IDLE or DELETE to AUTHORS is not allowed.
       if (!this.checkState(
-        State.CREATE, State.TEXT, State.IMAGES, State.AUTHORS, State.TAGS, State.DATE
+        State.CREATE, State.TEXT, State.IMAGES, State.AUTHORS, State.TAGS,
+        State.DATE
       )) {
         return;
       }
@@ -343,7 +346,8 @@
     async onTagsCommand(update) {
       // From IDLE or DELETE to TAGS is not allowed.
       if (!this.checkState(
-        State.CREATE, State.TEXT, State.IMAGES, State.AUTHORS, State.TAGS, State.DATE
+        State.CREATE, State.TEXT, State.IMAGES, State.AUTHORS, State.TAGS,
+        State.DATE
       )) {
         return;
       }
@@ -361,7 +365,8 @@
     async onDateCommand(update) {
       // From IDLE or DELETE to CREATED is not allowed.
       if (!this.checkState(
-        State.CREATE, State.TEXT, State.IMAGES, State.AUTHORS, State.TAGS, State.DATE
+        State.CREATE, State.TEXT, State.IMAGES, State.AUTHORS, State.TAGS,
+        State.DATE
       )) {
         return;
       }
@@ -569,7 +574,7 @@
     async onCommitCommand(update) {
       if (!this.checkState(
         State.CREATE, State.DELETE, State.TEXT, State.IMAGES, State.AUTHORS,
-        State.TAGS
+        State.TAGS, State.DATE
       )) {
         return;
       }
@@ -599,7 +604,7 @@
     onCancelCommand(update) {
       if (!this.checkState(
         State.CREATE, State.DELETE, State.TEXT, State.IMAGES, State.AUTHORS,
-        State.TAGS
+        State.TAGS, State.DATE
       )) {
         return;
       }
@@ -649,17 +654,18 @@
     processImages(update) {
       this.refreshTimer();
       switch (this.state) {
-        // By default images message is handled as images. Images are not conflict
-        // with text states.
-        case State.CREATE:
-        case State.TEXT:
-        case State.IMAGES:
-        case State.AUTHORS:
-        case State.TAGS:
-          this.appendImages(update);
-          break;
-        default:
-          break;
+      // By default images message is handled as images. Images are not conflict
+      // with text states.
+      case State.CREATE:
+      case State.TEXT:
+      case State.IMAGES:
+      case State.AUTHORS:
+      case State.TAGS:
+      case State.DATE:
+        this.appendImages(update);
+        break;
+      default:
+        break;
       }
     }
   }
